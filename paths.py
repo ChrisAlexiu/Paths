@@ -225,7 +225,7 @@ def paths_plot(data_points, path_dist, file_save, cluster=None):
       • data_points: 2D NumPy array
       • path_dist: the path to plot; e.g., paths_list_greedy()[0]
       • file_save: filename; save plot image
-      • cluster: cluster labels
+      • cluster: cluster labels; optional
     - Return: None
     """
     #### 0 setup
