@@ -5,6 +5,7 @@ Given a set of data points (2D), identify paths to visit each point once and det
 """
 
 import itertools
+import collections
 import csv
 import numpy as np
 from scipy import spatial
@@ -53,26 +54,30 @@ def data_points_dist_mat(data_points):
 # =============================================================================
 # 1 generate list of paths: all or set
 # -----------------------------------------------------------------------------
-def paths_all_or_set_list(file_save, all_or_set="all", n=3):
+def paths_all_or_set_list(all_or_set="all", n_locs=3, save=1):
     """
     Generate list of possible paths to visit each data point once.
     - WARNING: quantity of possible paths may be HUGE (e.g., 20! = 2.4x10^18)
     - This function does not do any distance calculation.
-    - Thus function must be supplied with a value for 'n', the quantity of data
-      points you will be working with - do not provide the actual data points.
+    - Thus function must be supplied with a value for 'n_locs', the quantity of
+      locations (data points that you will be working with - do not provide the
+      actual data points).
     - Parameters:
-      • file_save: filename, results will be output to this file
-      • all_or_set: "all" or "set";
+      • all_or_set: string, "all" or "set";
         • if "all", generate all possible paths INcluding reverse duplicates
-          (e.g., 1->2->3 != 3->2->1; take both), quantity of points = n!;
+          (e.g., 1->2->3 != 3->2->1; take both), quantity of paths = n!;
         • if "set", generate all possible paths EXcluding reverse duplicates
-          (e.g., 1->2->3 = 3->2->1; take one), quantity of points = n!/2;
-      • n: quantity of data points
-    - Return: None - this function outputs results to CSV file such that each
-      row represents one path as a sequence of location data point labels
+          (e.g., 1->2->3 = 3->2->1; take one), quantity of paths = n!/2;
+      • n_loc: integer; quantity of locations (data points) that you will be
+        working with
+      • save: 1 or string; default=1; if 1, save results to object; if string
+        (filename), save results to CSV file (include the '.csv' extension)
+    - Return:
+      • if save=1: iterator of tuples; paths (save results to object)
+      • if save=string: None (save results to CSV file)
     """
-    paths_all = itertools.permutations(range(n))
-    # if 'all', use all - if 'set', filter paths to remove reverse duplicates
+    paths_all = itertools.permutations(range(n_locs))
+    # get paths (all_or_set): if 'all', use all - if 'set', filter paths to remove reverse duplicates
     if all_or_set == "all":
         paths = paths_all
     if all_or_set == "set":
@@ -81,81 +86,107 @@ def paths_all_or_set_list(file_save, all_or_set="all", n=3):
             if path not in paths and tuple(reversed(path)) not in paths:
                 paths.add(path)
         paths = iter(paths)
-    # write to CSV
-    csv_file = open(file_save, 'w')
-    csv_wrtr = csv.writer(csv_file, delimiter=',')
-    for path in paths:
-        csv_wrtr.writerow((path))
-    csv_file.close()
-    return None
+    # save results (p_save): if 1, save to object - if string, save to CSV file
+    if save == 1:
+        return paths
+    if type(save) == str:
+        csv_file = open(save, 'w')
+        csv_wrtr = csv.writer(csv_file, delimiter=',')
+        for path in paths:
+            csv_wrtr.writerow((path))
+        csv_file.close()
+        return None
 # =============================================================================
 
 
 # =============================================================================
 # 2. calculate distance for 'all' or 'set' paths
 # -----------------------------------------------------------------------------
-def paths_all_or_set_strm(file_load):
+def paths_all_or_set_strm(paths):
     """
-    Generate a stream of paths from a CSV file produced with
-    paths_all_or_set_list().
+    Produce a generator (stream) of paths from an object such as a list, tuple,
+    iterator, or CSV file produced with paths_all_or_set_list().
     - This generator is meant to be used within paths_all_or_set_dist().
     - Parameters:
-      • file_load: filename; CSV file of paths produced with
-        paths_all_or_set_list()
+      • paths: list, tuple, iterator, or string of CSV filename; the paths
+        object should contain a series of lists or tuples (the paths)
     - Return: (generator)
     """
-    csv_file = open(file_load)
-    paths = csv.reader(csv_file, delimiter=',')
-    for path in paths:
-        path = [int(loc) for loc in path] 
-        yield path
-    csv_file.close()
-
-def paths_all_or_set_dist(file_load, file_save, dist_matrix, k=0):
+    if type(paths) != str:
+        for path in paths:
+            yield path
+    if type(paths) == str:
+        csv_file = open(paths)
+        paths = csv.reader(csv_file, delimiter=',')
+        for path in paths:
+            path = [int(location) for location in path] 
+            yield path
+        csv_file.close()
+        
+def paths_all_or_set_dist(dist_matrix, paths, save=1, k="all"):
     """
     Calculate total distance for each supplied path.
     - Parameters:
-      • file_load: filename; CSV file of paths produced with
-        paths_all_or_set_list(), this gets passed to paths_all_or_set_strm()
-      • file_save: filename; CSV file of results (paths with distances)
-      • dist_matrix: a NumPy array, should be a symmetrix matrix like result
+      • dist_matrix: NumPy array; should be a symmetrix matrix like result
         from data_points_dist_mat()
-      • k: quantity of best/shortest paths to return
+      • paths: list, tuple, iterator, or string of CSV filename; the paths
+        object should contain a series of lists or tuples (the paths)
+      • save: 1 or string; default=1; if 1, save results to object; if string
+        (filename), save results to CSV file (include the '.csv' extension)
+      • k: "all" or integer for quantity of best/shortest paths to retain
     - Return:
-      • k_best: list of dictionaries (keys: path, dist), each dict represents
-        one path with the sequence of points visited and the total path distance
+      • if save=1: list of tuples; paths (save results to object)
+      • if save=string: None (save results to CSV file)
     """
-    n = len(dist_matrix)
-    paths = paths_all_or_set_strm(file_load)
-    csv_file = open(file_save, 'w')
-    csv_wrtr = csv.writer(csv_file, delimiter='\t')
-    k_best = []
-    while True:
-        try:
-            path = next(paths)
-            # get distance for each step (step = consecutive pair of locations)
-            step = [dist_matrix[(path[i],path[i+1])] for i in range(n-1)]
-            dist = sum(step)
-            # write to CSV
-            csv_wrtr.writerow((path,dist))
-            # bests
-            if k>0:
-                k_best.append((path,dist))
-                k_best = sorted(k_best, key=lambda x: x[1])
-            if k>0 and len(k_best)==k+1:
-                del k_best[-1]
-        except:
-            csv_file.close()
-            break
-    k_best = [{"path":list(path),"dist":dist} for path,dist in k_best]
-    return k_best
+    # 4 possibilites: 1. save all to obj, 2. save k to obj, 3. save all to CSV, 4. save k to CSV
+    n = dist_matrix.shape[0]
+    paths = paths_all_or_set_strm(paths)
+    data = []
+    # save to object
+    if save == 1:
+        while True:
+            try:
+                path = next(paths)
+                dist = [dist_matrix[(path[i],path[i+1])] for i in range(n-1)]
+                dist = sum(dist)
+                data.append((path,dist))
+                data = sorted(data, key=lambda x: x[1])
+                if type(k) == int and len(data) == k+1:
+                    del data[-1]
+            except:
+                break
+        return data
+    # save to CSV file
+    if type(save) == str:
+        csv_file = open(save, 'w')
+        csv_wrtr = csv.writer(csv_file, delimiter='\t')
+        while True:
+            try:
+                path = next(paths)
+                dist = [dist_matrix[(path[i],path[i+1])] for i in range(n-1)]
+                dist = sum(dist)
+                if k == "all":
+                    csv_wrtr.writerow((path,dist))
+                if type(k) == int:
+                    data.append((path,dist))
+                if type(k) == int and len(data) == k+1:
+                    data = sorted(data, key=lambda x: x[1])
+                    del data[-1]
+            except:
+                if type(k) == int:
+                    for (path,dist) in data:
+                        csv_wrtr.writerow((path,dist))
+                csv_file.close()
+                break
+        return None
 # =============================================================================
 
 
 # =============================================================================
 # 3 greedy approach: generate list of paths with distances
 # -----------------------------------------------------------------------------
-def paths_list_greedy(file_save, dist_matrix, sort=True):
+# def paths_list_greedy(file_save, dist_matrix, sort=True):
+def paths_list_greedy(dist_matrix, save=1):
     """
     Using greedy approach and visit each data point once, generate list of
     paths and their total distances.
@@ -165,60 +196,66 @@ def paths_list_greedy(file_save, dist_matrix, sort=True):
       (aka 'nearest neighbor' [NN] method)
     - Quantity of paths = n.
     - Parameters:
-      • file_save: filename; results will be output to this file
       • dist_matrix: NumPy array; should be a symmetrix matrix like result
         from data_points_dist_mat()
-      • sort: True or False; if True, sort paths by distance (smallest first)
+      • save: 1 or string; default=1; if 1, save results to object; if string
+        (filename), save results to CSV file (include the '.csv' extension)
     - Return:
-      • paths: list of dictionaries (keys: path, dist), each dict represents
-        one path with the sequence of points visited and the total path distance
+      • if save=1: list of tuples; paths (save results to object)
+      • if save=string: None (save results to CSV file)
     """
-    n = len(dist_matrix)
-    dp_ids = tuple(range(n))
-    paths = [{"path":None, "dist":None} for x in range(n)]
+    n = dist_matrix.shape[0]
+    dpIDs = tuple(range(n))
+    paths = [{"path":None, "dist":None} for i in range(n)]
     # get paths and distances
-    for dp in dp_ids:
-        path = [dp]
-        options = list(dp_ids)
-        options.remove(dp)
-        data = list(zip(options, dist_matrix[dp][options]))
+    for dpID in dpIDs:
+        # initialize path and dist
+        path = [dpID]
+        dist = np.float64(0) # or float(0)
+        # setup for first step
+        opts = list(dpIDs)
+        opts.remove(dpID)
+        data = list(zip(opts, dist_matrix[dpID][opts]))
+        # take steps
         for i in range(n-1):
-            goto = min(data, key=lambda x:x[1])[0]
-            path.append(min(data, key=lambda x:x[1]))
-            options.remove(goto)
-            data = list(zip(options, dist_matrix[goto][options]))
-        paths[dp]["path"] = [path[0]] + [a for a,b in path[1:]]
-        paths[dp]["dist"] = sum([b for a,b in path[1:]])
-    # sort
-    if sort == True:
-        paths = sorted(paths, key=lambda x: x["dist"])
-    # write to CSV
-    if file_save != None:
-        csv_file = open(file_save, 'w')
+            step_path , step_dist = min(data, key=lambda x:x[1])
+            path.append(step_path)
+            dist += step_dist
+            opts.remove(step_path)
+            data = list(zip(opts, dist_matrix[step_path][opts]))
+        paths[dpID]["path"] = path
+        paths[dpID]["dist"] = dist
+    paths = sorted(paths, key=lambda x: x["dist"])
+    # save to object
+    if save == 1:
+        return paths
+    # save to CSV file
+    if type(save) == str:
+        csv_file = open(save, 'w')
         csv_wrtr = csv.writer(csv_file, delimiter='\t')
         for x in paths:
             csv_wrtr.writerow((x["path"],x["dist"] ))
         csv_file.close()
-    return paths
+        return None
 # =============================================================================
 
 
 # =============================================================================
 # 4 plotting
 # -----------------------------------------------------------------------------
-def paths_plot(data_points, path_dist, file_save, cluster=None):
+def paths_plot(data_points, path_dist, save=None, cluster=None):
     """
     Plot the supplied points and path.
     - Parameters:
       • data_points: 2D NumPy array
       • path_dist: the path to plot; e.g., paths_list_greedy()[0]
-      • file_save: filename; save plot image
-      • cluster: cluster labels
+      • save: string; save the plot as an image with the supplied filename
+      • cluster: NumPy array; optional; cluster labels
     - Return: None
     """
     #### 0 setup
-    n = len(data_points)
-    dp_ids = range(n)
+    n = data_points.shape[0]
+    dpIDs = range(n)
     dp_x , dp_y = data_points[:,0] , data_points[:,1]
     path = path_dist["path"]
     dist = path_dist["dist"]
@@ -228,7 +265,7 @@ def paths_plot(data_points, path_dist, file_save, cluster=None):
     plt.title(s="Locations and Path \n (visit each point once)", weight='bold')
 
     #### 2 apply labels for data point IDs
-    for label,x,y in zip(['' if x==path[0] else x for x in dp_ids],dp_x,dp_y):
+    for label,x,y in zip(['' if x==path[0] else x for x in dpIDs],dp_x,dp_y):
         plt.annotate(
             s=label,
             color='k',
@@ -364,11 +401,12 @@ def paths_plot(data_points, path_dist, file_save, cluster=None):
         bbox=dict(ec='k', fc='w'),
         fontdict=dict(size=16),
     )
-        
-
+    
     #### all done
-    plt.savefig(filename=file_save, dpi=350, bbox_inches='tight',)
-    # plt.show()
+    if save == None:
+        plt.show()
+    if type(save) == str:
+        plt.savefig(filename=save, dpi=350, bbox_inches='tight',)
     return None
 # =============================================================================
 
