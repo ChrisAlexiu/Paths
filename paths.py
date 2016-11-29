@@ -28,13 +28,11 @@ def data_points_generate(n=3, lo=1, hi=10, seed=None):
       • hi: maximum value
       • seed: randomization seed; optional
     - Return:
-      • NumPy array 2D data points
+      • data_points: NumPy array 2D data points
     """
     if seed != None:
         np.random.seed(seed)
-    x = np.random.randint(low=lo, high=hi, size=n)
-    y = np.random.randint(low=lo, high=hi, size=n)
-    data_points = np.column_stack((x,y))
+    data_points = np.random.uniform(low=lo, high=hi, size=(n,2))
     return data_points
 
 def data_points_dist_mat(data_points):
@@ -86,8 +84,8 @@ def paths_all_or_set_list(file_save, all_or_set="all", n=3):
     # write to CSV
     csv_file = open(file_save, 'w')
     csv_wrtr = csv.writer(csv_file, delimiter=',')
-    for x in paths:
-        csv_wrtr.writerow((x))
+    for path in paths:
+        csv_wrtr.writerow((path))
     csv_file.close()
     return None
 # =============================================================================
@@ -145,7 +143,6 @@ def paths_all_or_set_dist(file_load, file_save, dist_matrix, k=0):
                 k_best.append((path,dist))
                 k_best = sorted(k_best, key=lambda x: x[1])
             if k>0 and len(k_best)==k+1:
-                # k_best.pop()
                 del k_best[-1]
         except:
             csv_file.close()
@@ -178,11 +175,8 @@ def paths_list_greedy(file_save, dist_matrix, sort=True):
     """
     n = len(dist_matrix)
     dp_ids = tuple(range(n))
-    # create dp_ids lookup to allow use of any ID while use 0-based ID for slice
-    dp_ids_lookup = zip(dp_ids, range(n))
-    dp_ids = list(range(n))
-    paths = [ {"path":None, "dist":None} for x in range(n) ]
-    # do it
+    paths = [{"path":None, "dist":None} for x in range(n)]
+    # get paths and distances
     for dp in dp_ids:
         path = [dp]
         options = list(dp_ids)
@@ -194,13 +188,7 @@ def paths_list_greedy(file_save, dist_matrix, sort=True):
             options.remove(goto)
             data = list(zip(options, dist_matrix[goto][options]))
         paths[dp]["path"] = [path[0]] + [a for a,b in path[1:]]
-        paths[dp]["dist"] = sum( [b for a,b in path[1:]] )
-    # revert to original dp_ids
-    for id_orig,id_0fix in dp_ids_lookup:
-        for path in paths:
-            for i in range(n):
-                if path["path"][i] == id_0fix:
-                    path["path"][i] = id_orig
+        paths[dp]["dist"] = sum([b for a,b in path[1:]])
     # sort
     if sort == True:
         paths = sorted(paths, key=lambda x: x["dist"])
@@ -225,7 +213,7 @@ def paths_plot(data_points, path_dist, file_save, cluster=None):
       • data_points: 2D NumPy array
       • path_dist: the path to plot; e.g., paths_list_greedy()[0]
       • file_save: filename; save plot image
-      • cluster: cluster labels; optional
+      • cluster: cluster labels
     - Return: None
     """
     #### 0 setup
