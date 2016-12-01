@@ -9,8 +9,8 @@ import collections
 import csv
 import numpy as np
 from scipy import spatial
-import matplotlib
-import matplotlib.pyplot as plt
+# import matplotlib
+# import matplotlib.pyplot as plt
 
 __author__ = "Chris Alexiu"
 __version__ = '1'
@@ -90,11 +90,11 @@ def paths_all_or_set_list(all_or_set="all", n_locs=3, save=1):
     if save == 1:
         return paths
     if type(save) == str:
-        csv_file = open(save, 'w')
-        csv_wrtr = csv.writer(csv_file, delimiter=',')
+        csv_file_w = open(save, 'w')
+        csv_writer = csv.writer(csv_file_w, delimiter=',')
         for path in paths:
-            csv_wrtr.writerow((path))
-        csv_file.close()
+            csv_writer.writerow((path))
+        csv_file_w.close()
         return None
 # =============================================================================
 
@@ -116,12 +116,12 @@ def paths_all_or_set_strm(paths):
         for path in paths:
             yield path
     if type(paths) == str:
-        csv_file = open(paths)
-        paths = csv.reader(csv_file, delimiter=',')
+        csv_file_r = open(paths)
+        paths = csv.reader(csv_file_r, delimiter=',')
         for path in paths:
-            path = [int(location) for location in path] 
+            path = tuple([int(location) for location in path])
             yield path
-        csv_file.close()
+        csv_file_r.close()
         
 def paths_all_or_set_dist(dist_matrix, paths, save=1, k="all"):
     """
@@ -134,51 +134,54 @@ def paths_all_or_set_dist(dist_matrix, paths, save=1, k="all"):
       • save: 1 or string; default=1; if 1, save results to object; if string
         (filename), save results to CSV file (include the '.csv' extension)
       • k: "all" or integer for quantity of best/shortest paths to retain
-    - Return:
-      • if save=1: list of tuples; paths (save results to object)
-      • if save=string: None (save results to CSV file)
+    - Return: None - generator or CSV file of paths and distances
     """
-    # 4 possibilites: 1. save all to obj, 2. save k to obj, 3. save all to CSV, 4. save k to CSV
+    # 4 possibilites:
+    # 1. save all to obj, 2. save k to obj, 3. save all to CSV, 4. save k to CSV
     n = dist_matrix.shape[0]
     paths = paths_all_or_set_strm(paths)
-    data = []
+    data = [] # used only for best k
     # save to object
     if save == 1:
-        while True:
-            try:
-                path = next(paths)
-                dist = [dist_matrix[(path[i],path[i+1])] for i in range(n-1)]
-                dist = sum(dist)
-                data.append((path,dist))
-                data = sorted(data, key=lambda x: x[1])
-                if type(k) == int and len(data) == k+1:
-                    del data[-1]
-            except:
-                break
-        return data
+        return paths_all_or_set_dist_out_obj(n, paths, data, dist_matrix, k)
     # save to CSV file
     if type(save) == str:
-        csv_file = open(save, 'w')
-        csv_wrtr = csv.writer(csv_file, delimiter='\t')
-        while True:
-            try:
-                path = next(paths)
-                dist = [dist_matrix[(path[i],path[i+1])] for i in range(n-1)]
-                dist = sum(dist)
-                if k == "all":
-                    csv_wrtr.writerow((path,dist))
-                if type(k) == int:
-                    data.append((path,dist))
-                if type(k) == int and len(data) == k+1:
-                    data = sorted(data, key=lambda x: x[1])
-                    del data[-1]
-            except:
-                if type(k) == int:
-                    for (path,dist) in data:
-                        csv_wrtr.writerow((path,dist))
-                csv_file.close()
-                break
-        return None
+        paths_all_or_set_dist_out_csv(n, paths, data, dist_matrix, k, save)
+    return None
+
+def paths_all_or_set_dist_out_obj(n, paths, data, dist_matrix, k):
+    for path in paths:
+        dist = [dist_matrix[(path[i],path[i+1])] for i in range(n-1)]
+        dist = sum(dist)
+        if k == "all":
+            yield (path,dist)
+        if type(k) == int:
+            data.append((path,dist))
+        if type(k) == int and len(data) == k+1:
+             data = sorted(data, key=lambda x: x[1])
+             del data[-1]
+    if type(k) == int:
+        for pathdist in data:
+            yield pathdist
+    return None
+
+def paths_all_or_set_dist_out_csv(n, paths, data, dist_matrix, k, save):
+    csv_file_w = open(save, 'w')
+    csv_writer = csv.writer(csv_file_w, delimiter='\t')
+    for path in paths:
+        dist = [dist_matrix[(path[i],path[i+1])] for i in range(n-1)]
+        dist = sum(dist)
+        if k == "all":
+            csv_writer.writerow((path,dist))
+        if type(k) == int:
+            data.append((path,dist))
+        if type(k) == int and len(data) == k+1:
+             data = sorted(data, key=lambda x: x[1])
+             del data[-1]
+    if type(k) == int:
+        for pathdist in data:
+            csv_writer.writerow((pathdist))
+    return None
 # =============================================================================
 
 
@@ -206,7 +209,7 @@ def paths_list_greedy(dist_matrix, save=1):
     """
     n = dist_matrix.shape[0]
     dpIDs = tuple(range(n))
-    paths = [{"path":None, "dist":None} for i in range(n)]
+    paths = [[None,None] for i in range(n)]
     # get paths and distances
     for dpID in dpIDs:
         # initialize path and dist
@@ -218,24 +221,25 @@ def paths_list_greedy(dist_matrix, save=1):
         data = list(zip(opts, dist_matrix[dpID][opts]))
         # take steps
         for i in range(n-1):
-            step_path , step_dist = min(data, key=lambda x:x[1])
+            step_path , step_dist = min(data, key=lambda x: x[1])
             path.append(step_path)
             dist += step_dist
             opts.remove(step_path)
             data = list(zip(opts, dist_matrix[step_path][opts]))
-        paths[dpID]["path"] = path
-        paths[dpID]["dist"] = dist
-    paths = sorted(paths, key=lambda x: x["dist"])
+        paths[dpID][0] = path
+        paths[dpID][1] = dist
+    paths = [(tuple(path),dist) for path,dist in paths]
+    paths = sorted(paths, key=lambda x: x[1])
     # save to object
     if save == 1:
         return paths
     # save to CSV file
     if type(save) == str:
-        csv_file = open(save, 'w')
-        csv_wrtr = csv.writer(csv_file, delimiter='\t')
+        csv_file_w = open(save, 'w')
+        csv_wrtr = csv.writer(csv_file_w, delimiter='\t')
         for x in paths:
-            csv_wrtr.writerow((x["path"],x["dist"] ))
-        csv_file.close()
+            csv_wrtr.writerow((x[0],x[1]))
+        csv_file_w.close()
         return None
 # =============================================================================
 
@@ -253,19 +257,25 @@ def paths_plot(data_points, path_dist, save=None, cluster=None):
       • cluster: NumPy array; optional; cluster labels
     - Return: None
     """
+    
+    import matplotlib
+    import matplotlib.pyplot as plt
+    
     #### 0 setup
     n = data_points.shape[0]
     dpIDs = range(n)
     dp_x , dp_y = data_points[:,0] , data_points[:,1]
-    path = path_dist["path"]
-    dist = path_dist["dist"]
+    # path = path_dist["path"]
+    # dist = path_dist["dist"]
+    path , dist = path_dist
     matplotlib.rc('font', family='consolas')
     
     #### 1 title
-    plt.title(s="Locations and Path \n (visit each point once)", weight='bold')
+    plt.title(s="Locations and Path (visit each point once)", weight='bold')
 
     #### 2 apply labels for data point IDs
-    for label,x,y in zip(['' if x==path[0] else x for x in dpIDs],dp_x,dp_y):
+    for label, x, y in \
+        zip(['' if x==path[0] or x==path[-1] else x for x in dpIDs], dp_x, dp_y):
         plt.annotate(
             s=label,
             color='k',
@@ -322,7 +332,7 @@ def paths_plot(data_points, path_dist, save=None, cluster=None):
             labels=legend_labels,
             title=str(len(cluster_set))+" clusters (n)",
             loc='upper left',
-            bbox_to_anchor=(1, 1.02),
+            bbox_to_anchor=(1.19, 1.02),
         )
     
     #### 5 indicate start point: label, marker, color
@@ -335,28 +345,31 @@ def paths_plot(data_points, path_dist, save=None, cluster=None):
     #     fontsize=15,
     #     # arrowprops=dict(width=1, headwidth=1, headlength=1, facecolor='r', shrink=4, fc='r', ec='r'),
     # )
+
     plt.scatter(
-        dp_x[path][0],
-        dp_y[path][0],
+        dp_x[path[0]],
+        dp_y[path[0]],
         s=80,
         c='r',
         marker='x',
     )
-    plt.annotate(
-        s=path[0],
-        color='r',
-        xy=(dp_x[path][0], dp_y[path][0]),
-        xytext=(-10,10),
-        textcoords='offset pixels',
-        fontsize=12,
-    )
+    for i in [0, -1]:
+        plt.annotate(
+            s=path[i],
+            color='r',
+            xy=(dp_x[path[i]], dp_y[path[i]]),
+            xytext=(-10,10),
+            textcoords='offset pixels',
+            fontsize=12,
+            weight='bold'
+        )
     
     #### 6 pathway arrows
     # 6.1 interpolation for arrows between points
     inter = np.array([[0,0]])
     threshold = (np.max(data_points) - np.min(data_points)) * 0.1
     for i in range(n-1):
-        p_this , p_next = data_points[path][i] , data_points[path][i+1]
+        p_this , p_next = data_points[path[i]] , data_points[path[i+1]]
         inter = np.vstack((inter,p_this))
         distance = spatial.distance.pdist(X=(p_this,p_next))
         if distance > threshold:
@@ -371,7 +384,7 @@ def paths_plot(data_points, path_dist, save=None, cluster=None):
                 new = np.column_stack((new_x,new_y))
                 new = new[1:]
             inter = np.vstack((inter,new))
-    inter = np.vstack((inter, data_points[path][-1])) # add last original point
+    inter = np.vstack((inter, data_points[path[-1]])) # add last original point
     inter = inter[1:] # drop initial 0,0
     # 6.2 plot arrows
     for i in range(len(inter)-1):
@@ -394,12 +407,13 @@ def paths_plot(data_points, path_dist, save=None, cluster=None):
         + "•dist=" + '\n' \
         + " {:,.2f}".format(dist)
     plt.figtext(
-        x=0.92, y=0.11,
+        # x=0.92, y=0.11,
+        x=0.92, y=0.89,
         s=info_text,
-        verticalalignment='bottom',
+        verticalalignment='top',
         horizontalalignment='left',
         bbox=dict(ec='k', fc='w'),
-        fontdict=dict(size=16),
+        fontdict=dict(size=14),
     )
     
     #### all done
