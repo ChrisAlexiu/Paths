@@ -5,8 +5,11 @@ Given a set of data points (2D), identify paths to visit each point once and det
 """
 
 import itertools
-import collections
 import csv
+import time
+import datetime
+import multiprocessing
+import os
 import numpy as np
 from scipy import spatial
 # import matplotlib
@@ -16,6 +19,7 @@ __author__ = "Chris Alexiu"
 __version__ = '1'
 __maintainer__ = "Chris Alexiu" 
 __status__ = "Production"
+
 
 # =============================================================================
 # 0 setup: data points, distance matrix
@@ -35,6 +39,7 @@ def data_points_generate(n=3, lo=1, hi=10, seed=None):
         np.random.seed(seed)
     data_points = np.random.uniform(low=lo, high=hi, size=(n,2))
     return data_points
+
 
 def data_points_dist_mat(data_points):
     """
@@ -100,7 +105,25 @@ def paths_all_or_set_list(all_or_set="all", n_locs=3, save=1):
 
 
 # =============================================================================
-# 2. calculate distance for 'all' or 'set' paths
+# 2. utility function for calculating path distance 
+# -----------------------------------------------------------------------------
+    """
+    Utility function for calculating path distance.
+    - Parameters:
+      • path: list or tuple
+    - Return:
+      • dist: distance; the distance for the given path calculated from the given
+        distance matrix
+    """
+
+    # experimental, 1
+    dist = np.sum(dist)
+    return dist
+# =============================================================================
+
+
+# =============================================================================
+# 3. calculate distance for 'all' or 'set' paths
 # -----------------------------------------------------------------------------
 def paths_all_or_set_strm(paths):
     """
@@ -122,13 +145,12 @@ def paths_all_or_set_strm(paths):
             path = tuple([int(location) for location in path])
             yield path
         csv_file_r.close()
+    return None
+
         
-def paths_all_or_set_dist(dist_matrix, paths, save=1, k="all"):
     """
     Calculate total distance for each supplied path.
     - Parameters:
-      • dist_matrix: NumPy array; should be a symmetrix matrix like result
-        from data_points_dist_mat()
       • paths: list, tuple, iterator, or string of CSV filename; the paths
         object should contain a series of lists or tuples (the paths)
       • save: 1 or string; default=1; if 1, save results to object; if string
@@ -138,58 +160,55 @@ def paths_all_or_set_dist(dist_matrix, paths, save=1, k="all"):
     """
     # 4 possibilites:
     # 1. save all to obj, 2. save k to obj, 3. save all to CSV, 4. save k to CSV
-    n = dist_matrix.shape[0]
     paths = paths_all_or_set_strm(paths)
-    data = [] # used only for best k
+    kdata = [] # used only for best k
     # save to object
     if save == 1:
-        return paths_all_or_set_dist_out_obj(n, paths, data, dist_matrix, k)
     # save to CSV file
     if type(save) == str:
-        paths_all_or_set_dist_out_csv(n, paths, data, dist_matrix, k, save)
     return None
 
-def paths_all_or_set_dist_out_obj(n, paths, data, dist_matrix, k):
+
+    """
+    Helper function for paths_all_or_set_dist(), used to save results to object.
+    """
     for path in paths:
-        dist = [dist_matrix[(path[i],path[i+1])] for i in range(n-1)]
-        dist = sum(dist)
         if k == "all":
             yield (path,dist)
         if type(k) == int:
-            data.append((path,dist))
-        if type(k) == int and len(data) == k+1:
-             data = sorted(data, key=lambda x: x[1])
-             del data[-1]
+            kdata.append((path,dist))
+        if type(k) == int and len(kdata) == k+1:
+             kdata = sorted(kdata, key=lambda x: x[1])
+             del kdata[-1]
     if type(k) == int:
-        for pathdist in data:
-            yield pathdist
+        for path_dist in kdata:
+            yield path_dist
     return None
 
-def paths_all_or_set_dist_out_csv(n, paths, data, dist_matrix, k, save):
+
+    """
+    Helper function for paths_all_or_set_dist(), used to save results to CSV file.
+    """
     csv_file_w = open(save, 'w')
     csv_writer = csv.writer(csv_file_w, delimiter='\t')
     for path in paths:
-        dist = [dist_matrix[(path[i],path[i+1])] for i in range(n-1)]
-        dist = sum(dist)
         if k == "all":
             csv_writer.writerow((path,dist))
         if type(k) == int:
-            data.append((path,dist))
-        if type(k) == int and len(data) == k+1:
-             data = sorted(data, key=lambda x: x[1])
-             del data[-1]
+            kdata.append((path,dist))
+        if type(k) == int and len(kdata) == k+1:
+             kdata = sorted(kdata, key=lambda x: x[1])
+             del kdata[-1]
     if type(k) == int:
-        for pathdist in data:
-            csv_writer.writerow((pathdist))
+        for path_dist in kdata:
+            csv_writer.writerow((path_dist))
     return None
 # =============================================================================
 
 
 # =============================================================================
-# 3 greedy approach: generate list of paths with distances
+# 4 greedy approach: generate list of paths with distances
 # -----------------------------------------------------------------------------
-# def paths_list_greedy(file_save, dist_matrix, sort=True):
-def paths_list_greedy(dist_matrix, save=1):
     """
     Using greedy approach and visit each data point once, generate list of
     paths and their total distances.
@@ -199,36 +218,25 @@ def paths_list_greedy(dist_matrix, save=1):
       (aka 'nearest neighbor' [NN] method)
     - Quantity of paths = n.
     - Parameters:
-      • dist_matrix: NumPy array; should be a symmetrix matrix like result
-        from data_points_dist_mat()
       • save: 1 or string; default=1; if 1, save results to object; if string
         (filename), save results to CSV file (include the '.csv' extension)
     - Return:
       • if save=1: list of tuples; paths (save results to object)
       • if save=string: None (save results to CSV file)
     """
-    n = dist_matrix.shape[0]
-    dpIDs = tuple(range(n))
-    paths = [[None,None] for i in range(n)]
+    paths = [None] * n
     # get paths and distances
-    for dpID in dpIDs:
-        # initialize path and dist
-        path = [dpID]
-        dist = np.float64(0) # or float(0)
-        # setup for first step
-        opts = list(dpIDs)
-        opts.remove(dpID)
-        data = list(zip(opts, dist_matrix[dpID][opts]))
+    for i in range(n):
+        # initialize path and setup for first step
+        path = [i]
+        opts = list(range(n))
+        opts.remove(i)
         # take steps
-        for i in range(n-1):
-            step_path , step_dist = min(data, key=lambda x: x[1])
-            path.append(step_path)
-            dist += step_dist
-            opts.remove(step_path)
-            data = list(zip(opts, dist_matrix[step_path][opts]))
-        paths[dpID][0] = path
-        paths[dpID][1] = dist
-    paths = [(tuple(path),dist) for path,dist in paths]
+        for j in range(n-1):
+            step = min(data, key=lambda x: x[1])[0]
+            path.append(step)
+            opts.remove(step)
+        paths[i] = path
     paths = sorted(paths, key=lambda x: x[1])
     # save to object
     if save == 1:
@@ -245,7 +253,185 @@ def paths_list_greedy(dist_matrix, save=1):
 
 
 # =============================================================================
-# 4 plotting
+# 5 improve an identified path via point swapping
+# -----------------------------------------------------------------------------
+    max_iter=None, max_time=None, parallel=False, report=False):
+    """
+    Try to find an improved path from a reference path by swapping pairs of 
+    sequences of one or more locations.
+    - Given a path, swap a pair of single or multiple locations, then calculate 
+      the distance. Do this for all possible swaps. Choose the best swap. Iterate 
+      until max_iter, max_time, or no better paths can be found.
+    - Parameters:
+      • path_dist: 2-tuple; 1. path, 2. distance
+      • output: string; "hist" (history) or "best"; default="hist"
+      • max_iter: None or integer; default=None
+      • max_time: None or string; default=None; if string, use input like "30s",
+        "2m", or "1h" for however many seconds, minutes, or hours, respectively
+      • parallel: boolean or integer; default=None; set this to use 
+        multiprocessing and the number of processes to use
+      • report: boolean; default=False; if True, when finished, print a brief 
+        report containing runtime and the distance delta
+    - Return:
+      • if output="hist: list containing all step-wise improvements
+      • if output="best: 2-tuple containing best path and distance
+    """
+    t1 = time.time()
+    path_init , dist_init = path_dist
+    n = len(path_init)
+        
+    #### changes type 1 - pairs of single-location swaps
+    ct1 = itertools.product(range(n), repeat=2)
+    ct1 = [(a,b) for a,b in ct1 if a<b]
+    ct1 = [((a,a+1),(b,b+1),1,1) for a,b in ct1]
+        
+    #### changes type 2 - pairs of multi-location swaps with all 4 orderings
+    ct2 = []
+    for seq_len in range(2,int(n/2)+1):
+        # get all index k-seqs
+        temp = [list(range(n))[i:i+seq_len] for i in range(n+1-seq_len)]
+        # get all index k-seqs termini (inclusive,exclusive)
+        temp = [(x[0],x[-1]+1) for x in temp]
+        # get cartesian product for all index k-seqs termini
+        temp = list(itertools.product(temp, repeat=2))
+        # filter to remove self-swaps, overlapping-swaps, and reverse-swaps
+            # e.g., remove: (0,0),(0,0); (0,2),(1,3); (0,2),(2,0)
+        temp = [(a,b) for a,b in temp
+            if a!=b and not a[0]<b[0]<a[1] and not b[0]<a[0]<b[1]]
+        temp = [tuple(sorted(x)) for x in temp]
+        temp = sorted(set(temp))
+        # get cartesian product of each index k-seq with all 4 orderings
+        temp = itertools.product(temp,itertools.product([1,-1],repeat=2))
+        # reduce nesting
+        temp = [(a,b,x,y) for (a,b),(x,y) in temp]
+        # done
+        ct2.append(temp)
+    ct2 = list(itertools.chain.from_iterable(ct2))
+    
+    # changes type 3 - multi-location inversions
+    ct3 = []
+    for seq_len in range(2,n):
+        temp = [list(range(n))[i:i+seq_len] for i in range(n+1-seq_len)]
+        temp = [(x[0],x[-1]+1) for x in temp]
+        temp = [((a,b),(a,b),-1,-1) for a,b in temp]
+        ct3.append(temp)
+    ct3 = list(itertools.chain.from_iterable(ct3))
+    
+    #### final prep
+    ct_all = list(itertools.chain(ct1, ct2, ct3))
+    n_options = len(ct_all)
+    del ct1, ct2, ct3
+    
+    n_cpu = os.cpu_count()
+    if parallel in (True, "True", "true", "T", "t"):
+        parallel , n_processes = True , n_cpu-1
+    if type(parallel) == int and parallel != 0:
+        parallel , n_processes = True , parallel if parallel<=n_cpu else n_cpu
+    if parallel in (False, "False", "false", "F", "f", 0):
+        parallel , n_processes = False , "N/A"
+    del n_cpu
+    
+    max_time_report = max_time
+    if max_time != None:
+        te_denominator = dict(zip("s m h".split() , (1, 60, 60**2)))
+        te_denominator = te_denominator[max_time[-1]]
+        max_time = float(max_time[:-1])
+
+    path_best , dist_best = list(path_init) , dist_init
+    history = []
+    history.append((path_best,dist_best,*["N/A"]*4))
+    loop_i = -1
+
+    ##### do it
+    while True:
+        loop_i += 1
+        if max_iter != None and loop_i == max_iter:
+            exit_cond = "max_iter"
+            break
+        if max_time != None: 
+            t2 = (time.time() - t1) / te_denominator
+            if t2 > max_time:
+                exit_cond = "max_time"
+                break
+        
+        iterthis = list(zip(
+            itertools.repeat(path_best, n_options),
+            itertools.repeat(dist_best, n_options),
+            ct_all,
+        ))
+
+        if parallel == True:
+            mp_pool = multiprocessing.Pool(processes=n_processes)
+            history_iter = mp_pool.map(paths_change_improve_main, iterthis)
+            mp_pool.close()
+            mp_pool.join()
+        
+        if parallel == False:
+            history_iter = [paths_change_improve_main(x) for x in iterthis]
+        
+        history_iter = [x for x in history_iter if x!=None]
+        
+        # pick best from each iter - use best as start point for next iter
+        if len(history_iter) == 0:
+            exit_cond = "finished"
+            break
+        this_iter_best = min(history_iter, key=lambda x:x[1])
+        history.append(this_iter_best)
+        path_best , dist_best = this_iter_best[0:2]
+    
+    # reporting
+    if report in (True, "True", "true", "T", "t", 1):
+        t2 = str(datetime.timedelta(seconds=time.time()-t1))
+        t2 = t2[:t2.index(".")]
+        print("Report")
+        print("Exit b/c:", exit_cond)
+        print("Runtime :", t2)
+        print("Max_Time:", max_time_report)
+        print("Max_Iter:", max_iter)
+        print("Parallel:", parallel, "• (n processes = {:})".format(n_processes))
+        print("Options :", "{:,}".format(n_options))
+        print("Path Len:", "{:,}".format(n))
+        if path_best != list(path_init):
+            print("Result  : A better/shorter path was found", end="") 
+            print(" - {:} change(s) were made:".format(len(history)-1))
+            print("  • Initial: {:10,.2f} unit".format(dist_init))
+            print("  • Final  : {:10,.2f} unit".format(dist_best))
+            print("  • Delta x: {:10,.2f} unit".format(dist_init-dist_best))
+            print("  • Delta %: {:10,.2f} %"\
+                .format((dist_init-dist_best)/dist_init*100))
+        if path_best == list(path_init):
+            print("A better/shorter path could not be found.")
+    
+    # done
+    if output == "hist":
+        return history
+    if output == "best":
+        return (history[-1][0],history[-1][1])
+
+
+def paths_change_improve_main(x_from_iterthis):
+    """
+    For modularity and to enable multiprocessing, main action of
+    paths_change_improve() was put into this function.
+    """
+    path_next = list(path_best)
+
+    a , b , x , y = swap
+    path_next[slice(*a)] , path_next[slice(*b)] = \
+        path_next[slice(*b)][::x] , path_next[slice(*a)][::y]
+    
+    if path_next == path_best[::-1]:
+        return None
+    
+    if dist_next < dist_best:
+        return (path_next,dist_next,a,b,x,y)
+    else:
+        return None
+# =============================================================================
+
+
+# =============================================================================
+# 6 plotting
 # -----------------------------------------------------------------------------
 def paths_plot(data_points, path_dist, save=None, cluster=None):
     """
@@ -335,7 +521,6 @@ def paths_plot(data_points, path_dist, save=None, cluster=None):
             bbox_to_anchor=(1.19, 1.02),
         )
     
-    #### 5 indicate start point: label, marker, color
     # plt.annotate( # cancel arrow
     #     s='start',
     #     color='r',
@@ -421,6 +606,7 @@ def paths_plot(data_points, path_dist, save=None, cluster=None):
         plt.show()
     if type(save) == str:
         plt.savefig(filename=save, dpi=350, bbox_inches='tight',)
+    plt.clf()
     return None
 # =============================================================================
 
