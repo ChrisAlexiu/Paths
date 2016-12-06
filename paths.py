@@ -35,7 +35,7 @@ def data_points_generate(n=3, lo=1, hi=10, seed=None):
     - Return:
       • data_points: NumPy array 2D data points
     """
-    if seed != None:
+    if seed is not None:
         np.random.seed(seed)
     data_points = np.random.uniform(low=lo, high=hi, size=(n,2))
     return data_points
@@ -107,18 +107,21 @@ def paths_all_or_set_list(all_or_set="all", n_locs=3, save=1):
 # =============================================================================
 # 2. utility function for calculating path distance 
 # -----------------------------------------------------------------------------
+def calc_dist(path, dist_mtrx):
     """
     Utility function for calculating path distance.
     - Parameters:
       • path: list or tuple
+      • dist_mtrx: NumPy array; a distance matrix
     - Return:
       • dist: distance; the distance for the given path calculated from the given
         distance matrix
     """
+    return sum([dist_mtrx[step] for step in zip(path[:-1],path[1:])])
 
-    # experimental, 1
-    dist = np.sum(dist)
-    return dist
+def calc_dist_e1(path, dist_mtrx):
+    # experimental,1 - this is slower than above despite proper slice method
+    return np.sum(dist_mtrx[path[:-1],path[1:]])
 # =============================================================================
 
 
@@ -148,9 +151,11 @@ def paths_all_or_set_strm(paths):
     return None
 
         
+def paths_all_or_set_dist(paths, dist_mtrx, save=1, k="all"):
     """
     Calculate total distance for each supplied path.
     - Parameters:
+      • dist_mtrx: NumPy array; a distance matrix
       • paths: list, tuple, iterator, or string of CSV filename; the paths
         object should contain a series of lists or tuples (the paths)
       • save: 1 or string; default=1; if 1, save results to object; if string
@@ -164,15 +169,19 @@ def paths_all_or_set_strm(paths):
     kdata = [] # used only for best k
     # save to object
     if save == 1:
+        return paths_all_or_set_dist_out_obj(paths, dist_mtrx, k, kdata)
     # save to CSV file
     if type(save) == str:
+        paths_all_or_set_dist_out_csv(paths, dist_mtrx, k, kdata, save)
     return None
 
 
+def paths_all_or_set_dist_out_obj(paths, dist_mtrx, k, kdata):
     """
     Helper function for paths_all_or_set_dist(), used to save results to object.
     """
     for path in paths:
+        dist = calc_dist(path, dist_mtrx)
         if k == "all":
             yield (path,dist)
         if type(k) == int:
@@ -186,12 +195,14 @@ def paths_all_or_set_strm(paths):
     return None
 
 
+def paths_all_or_set_dist_out_csv(paths, dist_mtrx, k, kdata, save):
     """
     Helper function for paths_all_or_set_dist(), used to save results to CSV file.
     """
     csv_file_w = open(save, 'w')
     csv_writer = csv.writer(csv_file_w, delimiter='\t')
     for path in paths:
+        dist = calc_dist(path, dist_mtrx)
         if k == "all":
             csv_writer.writerow((path,dist))
         if type(k) == int:
@@ -209,6 +220,7 @@ def paths_all_or_set_strm(paths):
 # =============================================================================
 # 4 greedy approach: generate list of paths with distances
 # -----------------------------------------------------------------------------
+def paths_greedy(dist_mtrx, save=1, sort=True):
     """
     Using greedy approach and visit each data point once, generate list of
     paths and their total distances.
@@ -218,12 +230,14 @@ def paths_all_or_set_strm(paths):
       (aka 'nearest neighbor' [NN] method)
     - Quantity of paths = n.
     - Parameters:
+      • dist_mtrx: NumPy array; a distance matrix
       • save: 1 or string; default=1; if 1, save results to object; if string
         (filename), save results to CSV file (include the '.csv' extension)
     - Return:
       • if save=1: list of tuples; paths (save results to object)
       • if save=string: None (save results to CSV file)
     """
+    n = dist_mtrx.shape[0]
     paths = [None] * n
     # get paths and distances
     for i in range(n):
@@ -231,12 +245,15 @@ def paths_all_or_set_strm(paths):
         path = [i]
         opts = list(range(n))
         opts.remove(i)
+        data = list(zip(opts, dist_mtrx[i][opts]))
         # take steps
         for j in range(n-1):
             step = min(data, key=lambda x: x[1])[0]
             path.append(step)
             opts.remove(step)
+            data = list(zip(opts, dist_mtrx[step][opts]))
         paths[i] = path
+    paths = [(tuple(path),calc_dist(path,dist_mtrx)) for path in paths]
     paths = sorted(paths, key=lambda x: x[1])
     # save to object
     if save == 1:
@@ -253,8 +270,9 @@ def paths_all_or_set_strm(paths):
 
 
 # =============================================================================
-# 5 improve an identified path via point swapping
+# 5 improve an identified path
 # -----------------------------------------------------------------------------
+def paths_improve(path_dist, dist_mtrx, output="hist", \
     max_iter=None, max_time=None, parallel=False, report=False):
     """
     Try to find an improved path from a reference path by swapping pairs of 
@@ -264,6 +282,7 @@ def paths_all_or_set_strm(paths):
       until max_iter, max_time, or no better paths can be found.
     - Parameters:
       • path_dist: 2-tuple; 1. path, 2. distance
+      • dist_mtrx: NumPy array; a distance matrix
       • output: string; "hist" (history) or "best"; default="hist"
       • max_iter: None or integer; default=None
       • max_time: None or string; default=None; if string, use input like "30s",
@@ -279,14 +298,115 @@ def paths_all_or_set_strm(paths):
     t1 = time.time()
     path_init , dist_init = path_dist
     n = len(path_init)
+    
+    # get list of changes
+    chng_list_all = paths_improve_chng_list(n)
+    chng_opts_n = len(chng_list_all)
+    
+    # parallel
+    n_cpu = os.cpu_count()
+    if parallel in (True, "True", "true", "T", "t"):
+        parallel , n_processes = True , n_cpu-1
+    if type(parallel) == int and parallel != 0:
+        parallel , n_processes = True , parallel if parallel<=n_cpu else n_cpu
+    if parallel in (False, "False", "false", "F", "f", 0):
+        parallel , n_processes = False , "N/A"
+    del n_cpu
+    
+    # max_time
+    max_time_report = max_time
+    if max_time is not None:
+        te_denominator = dict(zip("s m h".split() , (1, 60, 60**2)))
+        te_denominator = te_denominator[max_time[-1]]
+        max_time = float(max_time[:-1])
+    
+    path_best , dist_best = list(path_init) , dist_init
+    history = []
+    history.append((tuple(path_best),dist_best,*["N/A"]*4))
+    loop_i = -1
+
+    # main action
+    while True:
+        loop_i += 1
+        if max_iter is not None and loop_i == max_iter:
+            exit_cond = "max_iter"
+            break
+        if max_time is not None: 
+            t2 = (time.time() - t1) / te_denominator
+            if t2 > max_time:
+                exit_cond = "max_time"
+                break
         
-    #### changes type 1 - pairs of single-location swaps
-    ct1 = itertools.product(range(n), repeat=2)
-    ct1 = [(a,b) for a,b in ct1 if a<b]
-    ct1 = [((a,a+1),(b,b+1),1,1) for a,b in ct1]
+        # recreate main iterator for each iteration
+        iterthis = list(zip(
+            itertools.repeat(dist_mtrx, chng_opts_n),
+            itertools.repeat(path_best, chng_opts_n),
+            itertools.repeat(dist_best, chng_opts_n),
+            chng_list_all,
+        ))
+
+        if parallel == True:
+            mp_pool = multiprocessing.Pool(processes=n_processes)
+            history_iter = mp_pool.map(paths_improve_chng_chck, iterthis)
+            mp_pool.close()
+            mp_pool.join()
         
-    #### changes type 2 - pairs of multi-location swaps with all 4 orderings
-    ct2 = []
+        if parallel == False:
+            history_iter = [paths_improve_chng_chck(x) for x in iterthis]
+        
+        history_iter = [x for x in history_iter if x is not None]
+        
+        # pick best from each iter - use best as start point for next iter
+        if not history_iter:
+            exit_cond = "finished"
+            break
+        this_iter_best = min(history_iter, key=lambda x:x[1])
+        history.append(this_iter_best)
+        path_best , dist_best = this_iter_best[0:2]
+    
+    # report
+    if report in (True, "True", "true", "T", "t", 1):
+        t2 = str(datetime.timedelta(seconds=time.time()-t1))
+        t2 = t2[:t2.index(".")]
+        print("Report")
+        print("Exit b/c:", exit_cond)
+        print("Runtime :", t2)
+        print("Max_Time:", max_time_report)
+        print("Max_Iter:", max_iter)
+        print("Parallel:", parallel, "• (n processes = {:})".format(n_processes))
+        print("Options :", "{:,}".format(chng_opts_n))
+        print("Path Len:", "{:,}".format(n))
+        if path_best != list(path_init):
+            print("Result  : A better/shorter path was found", end="") 
+            print(" - {:} change(s) were made:".format(len(history)-1))
+            print("  • Initial: {:10,.2f} unit".format(dist_init))
+            print("  • Final  : {:10,.2f} unit".format(dist_best))
+            print("  • Delta x: {:10,.2f} unit".format(dist_init-dist_best))
+            print("  • Delta %: {:10,.2f} %"\
+                .format((dist_init-dist_best)/dist_init*100))
+        if path_best == list(path_init):
+            print("A better/shorter path could not be found.")
+    
+    # done
+    history = [(path,float(dist),a,b,x,y) for path,dist,a,b,x,y in history]
+    if output == "hist":
+        return history
+    if output == "best":
+        return (history[-1][0],history[-1][1])
+
+def paths_improve_chng_list(n):
+    """
+    For modularity and ease of inspecting path change options, the code for producing the 
+    list of available path change options was isolated and put into this function.
+    (paths_improve_chng_list = paths improve change list)
+    """
+    # changes list 1: pairs of single-location swaps
+    chng_list_1 = itertools.product(range(n), repeat=2)
+    chng_list_1 = [(a,b) for a,b in chng_list_1 if a<b]
+    chng_list_1 = [((a,a+1),(b,b+1),1,1) for a,b in chng_list_1]
+        
+    # changes list 2: pairs of multi-location swaps with all 4 orderings
+    chng_list_2 = []
     for seq_len in range(2,int(n/2)+1):
         # get all index k-seqs
         temp = [list(range(n))[i:i+seq_len] for i in range(n+1-seq_len)]
@@ -305,126 +425,42 @@ def paths_all_or_set_strm(paths):
         # reduce nesting
         temp = [(a,b,x,y) for (a,b),(x,y) in temp]
         # done
-        ct2.append(temp)
-    ct2 = list(itertools.chain.from_iterable(ct2))
+        chng_list_2.append(temp)
+    chng_list_2 = list(itertools.chain.from_iterable(chng_list_2))
     
-    # changes type 3 - multi-location inversions
-    ct3 = []
+    # changes list 3: multi-location inversions
+    chng_list_3 = []
     for seq_len in range(2,n):
         temp = [list(range(n))[i:i+seq_len] for i in range(n+1-seq_len)]
         temp = [(x[0],x[-1]+1) for x in temp]
         temp = [((a,b),(a,b),-1,-1) for a,b in temp]
-        ct3.append(temp)
-    ct3 = list(itertools.chain.from_iterable(ct3))
-    
-    #### final prep
-    ct_all = list(itertools.chain(ct1, ct2, ct3))
-    n_options = len(ct_all)
-    del ct1, ct2, ct3
-    
-    n_cpu = os.cpu_count()
-    if parallel in (True, "True", "true", "T", "t"):
-        parallel , n_processes = True , n_cpu-1
-    if type(parallel) == int and parallel != 0:
-        parallel , n_processes = True , parallel if parallel<=n_cpu else n_cpu
-    if parallel in (False, "False", "false", "F", "f", 0):
-        parallel , n_processes = False , "N/A"
-    del n_cpu
-    
-    max_time_report = max_time
-    if max_time != None:
-        te_denominator = dict(zip("s m h".split() , (1, 60, 60**2)))
-        te_denominator = te_denominator[max_time[-1]]
-        max_time = float(max_time[:-1])
-
-    path_best , dist_best = list(path_init) , dist_init
-    history = []
-    history.append((path_best,dist_best,*["N/A"]*4))
-    loop_i = -1
-
-    ##### do it
-    while True:
-        loop_i += 1
-        if max_iter != None and loop_i == max_iter:
-            exit_cond = "max_iter"
-            break
-        if max_time != None: 
-            t2 = (time.time() - t1) / te_denominator
-            if t2 > max_time:
-                exit_cond = "max_time"
-                break
-        
-        iterthis = list(zip(
-            itertools.repeat(path_best, n_options),
-            itertools.repeat(dist_best, n_options),
-            ct_all,
-        ))
-
-        if parallel == True:
-            mp_pool = multiprocessing.Pool(processes=n_processes)
-            history_iter = mp_pool.map(paths_change_improve_main, iterthis)
-            mp_pool.close()
-            mp_pool.join()
-        
-        if parallel == False:
-            history_iter = [paths_change_improve_main(x) for x in iterthis]
-        
-        history_iter = [x for x in history_iter if x!=None]
-        
-        # pick best from each iter - use best as start point for next iter
-        if len(history_iter) == 0:
-            exit_cond = "finished"
-            break
-        this_iter_best = min(history_iter, key=lambda x:x[1])
-        history.append(this_iter_best)
-        path_best , dist_best = this_iter_best[0:2]
-    
-    # reporting
-    if report in (True, "True", "true", "T", "t", 1):
-        t2 = str(datetime.timedelta(seconds=time.time()-t1))
-        t2 = t2[:t2.index(".")]
-        print("Report")
-        print("Exit b/c:", exit_cond)
-        print("Runtime :", t2)
-        print("Max_Time:", max_time_report)
-        print("Max_Iter:", max_iter)
-        print("Parallel:", parallel, "• (n processes = {:})".format(n_processes))
-        print("Options :", "{:,}".format(n_options))
-        print("Path Len:", "{:,}".format(n))
-        if path_best != list(path_init):
-            print("Result  : A better/shorter path was found", end="") 
-            print(" - {:} change(s) were made:".format(len(history)-1))
-            print("  • Initial: {:10,.2f} unit".format(dist_init))
-            print("  • Final  : {:10,.2f} unit".format(dist_best))
-            print("  • Delta x: {:10,.2f} unit".format(dist_init-dist_best))
-            print("  • Delta %: {:10,.2f} %"\
-                .format((dist_init-dist_best)/dist_init*100))
-        if path_best == list(path_init):
-            print("A better/shorter path could not be found.")
+        chng_list_3.append(temp)
+    chng_list_3 = list(itertools.chain.from_iterable(chng_list_3))
     
     # done
-    if output == "hist":
-        return history
-    if output == "best":
-        return (history[-1][0],history[-1][1])
+    chng_list_all = list(itertools.chain(chng_list_1, chng_list_2, chng_list_3))
+    return chng_list_all
 
 
-def paths_change_improve_main(x_from_iterthis):
+def paths_improve_chng_chck(x_from_iterthis):
     """
     For modularity and to enable multiprocessing, main action of
-    paths_change_improve() was put into this function.
+    paths_change_improve() was isolated and put into this function.
+    (paths_improve_chng_chck = paths improve change check)
     """
+    dist_mtrx , path_best , dist_best , chng = x_from_iterthis
     path_next = list(path_best)
 
-    a , b , x , y = swap
+    a , b , x , y = chng
     path_next[slice(*a)] , path_next[slice(*b)] = \
         path_next[slice(*b)][::x] , path_next[slice(*a)][::y]
     
     if path_next == path_best[::-1]:
         return None
     
+    dist_next = calc_dist(path_next, dist_mtrx)
     if dist_next < dist_best:
-        return (path_next,dist_next,a,b,x,y)
+        return (tuple(path_next),dist_next,a,b,x,y)
     else:
         return None
 # =============================================================================
@@ -521,6 +557,7 @@ def paths_plot(data_points, path_dist, save=None, cluster=None):
             bbox_to_anchor=(1.19, 1.02),
         )
     
+    #### 5 indicate start and end point (label, marker, color)
     # plt.annotate( # cancel arrow
     #     s='start',
     #     color='r',
@@ -602,7 +639,7 @@ def paths_plot(data_points, path_dist, save=None, cluster=None):
     )
     
     #### all done
-    if save == None:
+    if save is None:
         plt.show()
     if type(save) == str:
         plt.savefig(filename=save, dpi=350, bbox_inches='tight',)
