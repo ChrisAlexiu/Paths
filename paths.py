@@ -345,13 +345,13 @@ def paths_improve(path_dist, dist_mtrx, output="hist", \
             chng_list_all,
         ))
 
-        if parallel == True:
+        if parallel is True:
             mp_pool = multiprocessing.Pool(processes=n_processes)
             history_iter = mp_pool.map(paths_improve_chng_chck, iterthis)
             mp_pool.close()
             mp_pool.join()
         
-        if parallel == False:
+        if parallel is False:
             history_iter = [paths_improve_chng_chck(x) for x in iterthis]
         
         history_iter = [x for x in history_iter if x is not None]
@@ -388,7 +388,6 @@ def paths_improve(path_dist, dist_mtrx, output="hist", \
             print("A better/shorter path could not be found.")
     
     # done
-    history = [(path,float(dist),a,b,x,y) for path,dist,a,b,x,y in history]
     if output == "hist":
         return history
     if output == "best":
