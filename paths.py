@@ -1,7 +1,9 @@
 """
 Pathing
 
-Given a set of data points (2D), identify paths to visit each point once and determine the distance traveled. Related: traveling salesman problem.
+Given a set of data points (2D), identify paths to visit each point once and 
+determine the distance traveled. Also try to find the shortest/optimal path.
+Related: traveling salesman problem.
 """
 
 import itertools
