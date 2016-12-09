@@ -1,9 +1,7 @@
 """
 Pathing
 
-Given a set of data points (2D), identify paths to visit each point once and 
-determine the distance traveled. Also try to find the shortest/optimal path.
-Related: traveling salesman problem.
+Given a set of data points (2D), identify paths to visit each point once and determine the distance traveled. Related: traveling salesman problem.
 """
 
 import itertools
@@ -59,7 +57,28 @@ def data_points_dist_mat(data_points):
 
 
 # =============================================================================
-# 1 generate list of paths: all or set
+# 1 utility function for calculating path distance 
+# -----------------------------------------------------------------------------
+def calc_dist(path, dist_mtrx):
+    """
+    Utility function for calculating path distance.
+    - Parameters:
+      • path: list or tuple
+      • dist_mtrx: NumPy array; a distance matrix
+    - Return:
+      • dist: distance; the distance for the given path calculated from the given
+        distance matrix
+    """
+    return sum([dist_mtrx[step] for step in zip(path[:-1],path[1:])])
+
+def calc_dist_e1(path, dist_mtrx):
+    # experimental,1 - this is slower than above despite proper slice method
+    return np.sum(dist_mtrx[path[:-1],path[1:]])
+# =============================================================================
+
+
+# =============================================================================
+# 2 generate list of paths: all or set
 # -----------------------------------------------------------------------------
 def paths_all_or_set_list(all_or_set="all", n_locs=3, save=1):
     """
@@ -107,28 +126,7 @@ def paths_all_or_set_list(all_or_set="all", n_locs=3, save=1):
 
 
 # =============================================================================
-# 2. utility function for calculating path distance 
-# -----------------------------------------------------------------------------
-def calc_dist(path, dist_mtrx):
-    """
-    Utility function for calculating path distance.
-    - Parameters:
-      • path: list or tuple
-      • dist_mtrx: NumPy array; a distance matrix
-    - Return:
-      • dist: distance; the distance for the given path calculated from the given
-        distance matrix
-    """
-    return sum([dist_mtrx[step] for step in zip(path[:-1],path[1:])])
-
-def calc_dist_e1(path, dist_mtrx):
-    # experimental,1 - this is slower than above despite proper slice method
-    return np.sum(dist_mtrx[path[:-1],path[1:]])
-# =============================================================================
-
-
-# =============================================================================
-# 3. calculate distance for 'all' or 'set' paths
+# 3 calculate distance for 'all' or 'set' paths
 # -----------------------------------------------------------------------------
 def paths_all_or_set_strm(paths):
     """
@@ -301,10 +299,6 @@ def paths_improve(path_dist, dist_mtrx, output="hist", \
     path_init , dist_init = path_dist
     n = len(path_init)
     
-    # get list of changes
-    chng_list_all = paths_improve_chng_list(n)
-    chng_opts_n = len(chng_list_all)
-    
     # parallel
     n_cpu = os.cpu_count()
     if parallel in (True, "True", "true", "T", "t"):
@@ -315,13 +309,18 @@ def paths_improve(path_dist, dist_mtrx, output="hist", \
         parallel , n_processes = False , "N/A"
     del n_cpu
     
-    # max_time
+    # configure time break
     max_time_report = max_time
     if max_time is not None:
         te_denominator = dict(zip("s m h".split() , (1, 60, 60**2)))
         te_denominator = te_denominator[max_time[-1]]
         max_time = float(max_time[:-1])
     
+    # get list of available changes
+    chng_list_all = paths_improve_chng_list(n)
+    chng_list_len = len(chng_list_all)
+    
+    # final prep
     path_best , dist_best = list(path_init) , dist_init
     history = []
     history.append((tuple(path_best),dist_best,*["N/A"]*4))
@@ -329,6 +328,8 @@ def paths_improve(path_dist, dist_mtrx, output="hist", \
 
     # main action
     while True:
+        
+        # control
         loop_i += 1
         if max_iter is not None and loop_i == max_iter:
             exit_cond = "max_iter"
@@ -340,29 +341,29 @@ def paths_improve(path_dist, dist_mtrx, output="hist", \
                 break
         
         # recreate main iterator for each iteration
-        iterthis = list(zip(
-            itertools.repeat(dist_mtrx, chng_opts_n),
-            itertools.repeat(path_best, chng_opts_n),
-            itertools.repeat(dist_best, chng_opts_n),
+        iterthis = zip(
+            itertools.repeat(dist_mtrx),
+            itertools.repeat(path_best),
+            itertools.repeat(dist_best),
             chng_list_all,
-        ))
+        )
 
         if parallel is True:
             mp_pool = multiprocessing.Pool(processes=n_processes)
-            history_iter = mp_pool.map(paths_improve_chng_chck, iterthis)
+            this_iter_hist = mp_pool.map(paths_improve_chng_chck, iterthis)
             mp_pool.close()
             mp_pool.join()
         
         if parallel is False:
-            history_iter = [paths_improve_chng_chck(x) for x in iterthis]
+            this_iter_hist = [paths_improve_chng_chck(x) for x in iterthis]
         
-        history_iter = [x for x in history_iter if x is not None]
+        this_iter_hist = [x for x in this_iter_hist if x is not None]
         
         # pick best from each iter - use best as start point for next iter
-        if not history_iter:
+        if not this_iter_hist:
             exit_cond = "finished"
             break
-        this_iter_best = min(history_iter, key=lambda x:x[1])
+        this_iter_best = min(this_iter_hist, key=lambda x:x[1])
         history.append(this_iter_best)
         path_best , dist_best = this_iter_best[0:2]
     
@@ -375,17 +376,18 @@ def paths_improve(path_dist, dist_mtrx, output="hist", \
         print("Runtime :", t2)
         print("Max_Time:", max_time_report)
         print("Max_Iter:", max_iter)
-        print("Parallel:", parallel, "• (n processes = {:})".format(n_processes))
-        print("Options :", "{:,}".format(chng_opts_n))
+        print("Parallel:", parallel, "• n processes = {:}".format(n_processes))
+        print("Options :", "{:,}".format(chng_list_len))
         print("Path Len:", "{:,}".format(n))
         if path_best != list(path_init):
+            w = len("{:,.2f}".format(dist_init))
             print("Result  : A better/shorter path was found", end="") 
             print(" - {:} change(s) were made:".format(len(history)-1))
-            print("  • Initial: {:10,.2f} unit".format(dist_init))
-            print("  • Final  : {:10,.2f} unit".format(dist_best))
-            print("  • Delta x: {:10,.2f} unit".format(dist_init-dist_best))
-            print("  • Delta %: {:10,.2f} %"\
-                .format((dist_init-dist_best)/dist_init*100))
+            print("  • Initial: {:{w},.2f} unit".format(dist_init, w=w))
+            print("  • Final  : {:{w},.2f} unit".format(dist_best, w=w))
+            print("  • Delta x: {:{w},.2f} unit".format(dist_init-dist_best, w=w))
+            print("  • Delta %: {:{w},.2f} %"\
+                .format((dist_init-dist_best)/dist_init*100, w=w))
         if path_best == list(path_init):
             print("A better/shorter path could not be found.")
     
