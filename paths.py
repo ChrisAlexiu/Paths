@@ -380,14 +380,15 @@ def paths_improve(path_dist, dist_mtrx, output="hist", \
         print("Options :", "{:,}".format(chng_list_len))
         print("Path Len:", "{:,}".format(n))
         if path_best != list(path_init):
-            w = len("{:,.2f}".format(dist_init))
+            f = "{:" + str(len("{:,.2f}".format(dist_init))) + ",.2f}"
+            unit = "unit"
             print("Result  : A better/shorter path was found", end="") 
             print(" - {:} change(s) were made:".format(len(history)-1))
-            print("  • Initial: {:{w},.2f} unit".format(dist_init, w=w))
-            print("  • Final  : {:{w},.2f} unit".format(dist_best, w=w))
-            print("  • Delta x: {:{w},.2f} unit".format(dist_init-dist_best, w=w))
-            print("  • Delta %: {:{w},.2f} %"\
-                .format((dist_init-dist_best)/dist_init*100, w=w))
+            print("  • Initial:", f.format(dist_init), unit)
+            print("  • Final  :", f.format(dist_best), unit)
+            print("  • Delta x:", f.format(dist_init-dist_best), unit)
+            print("  • Delta %:", f
+                .format((dist_init-dist_best)/dist_init*100), "%")
         if path_best == list(path_init):
             print("A better/shorter path could not be found.")
     
@@ -397,11 +398,12 @@ def paths_improve(path_dist, dist_mtrx, output="hist", \
     if output == "best":
         return (history[-1][0],history[-1][1])
 
+
 def paths_improve_chng_list(n):
     """
-    For modularity and ease of inspecting path change options, the code for producing the 
-    list of available path change options was isolated and put into this function.
-    (paths_improve_chng_list = paths improve change list)
+    For modularity and ease of inspecting path change options, the code for
+    producing the list of available path change options was isolated and put into 
+    this function. (paths_improve_chng_list = paths improve change list)
     """
     # changes list 1: pairs of single-location swaps
     chng_list_1 = itertools.product(range(n), repeat=2)
